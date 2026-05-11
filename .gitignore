@@ -1,0 +1,100 @@
+# ─────────────────────────────────────────────
+# 보안: 절대 커밋 금지
+# ─────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+*.pem
+*.key
+*.p12
+serviceAccountKey.json
+serviceAccount*.json
+firebase-adminsdk*.json
+google-services.json
+secrets/
+credentials/
+
+# Claude / IDE 설정
+.claude/
+.cursor/
+.vscode/
+.idea/
+
+# ─────────────────────────────────────────────
+# 학습 모델 / 대용량 파일 (LFS 미사용)
+# ─────────────────────────────────────────────
+training/models/
+training/data/*.jsonl
+training/checkpoints/
+*.pt
+*.pth
+*.safetensors
+*.gguf
+*.bin
+*.onnx
+
+# RAG ChromaDB
+rag/chroma_db/
+rag/index_metadata.json
+
+# 데이터 (가공된 학습 데이터, 일부 raw 데이터)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*.jsonl
+data/pipeline/
+
+# 업로드된 사용자 파일
+uploads/
+survey/
+
+# ─────────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# ─────────────────────────────────────────────
+# 테스트 / 로그
+# ─────────────────────────────────────────────
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+*.log
+logs/
+test_resp.txt
+
+# ─────────────────────────────────────────────
+# IDE / OS
+# ─────────────────────────────────────────────
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
