@@ -41,9 +41,14 @@ async def lifespan(app: FastAPI):
     if not settings.anthropic_api_key:
         logger.warning("Anthropic API key not configured - LLM features will use mock responses")
 
+    # PostgreSQL 커넥션 풀 생성 + 스키마 부트스트랩 (실패해도 앱은 계속 구동)
+    from .db import init_db, close_db
+    await init_db()
+
     yield  # ← 여기서 앱이 실행됨 (C#의 app.Run()에 해당)
 
     # ===== 종료 시 실행 (Shutdown) =====
+    await close_db()
     print("Shutting down AIPA Engine")
 
 

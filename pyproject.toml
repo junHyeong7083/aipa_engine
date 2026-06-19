@@ -18,9 +18,15 @@ dependencies = [
     "python-multipart>=0.0.6",
     "PyMuPDF>=1.23.0",
     "pdfplumber>=0.10.0",
-    "firebase-admin>=6.4.0",
     "transformers>=4.36.0",
     "accelerate>=0.25.0",
+    # --- 데이터/인증 (Firestore → PostgreSQL 마이그레이션) ---
+    "asyncpg>=0.29.0",          # 비동기 PostgreSQL 드라이버 (이벤트 루프 블로킹 없음)
+    "bcrypt>=4.1.0",            # 비밀번호 해싱 (local 가입용)
+    # --- 모델 추론 (Dockerfile 에서만 설치되던 것을 명시) ---
+    "torch>=2.1.0",
+    "chromadb>=0.4.0",
+    "sentence-transformers>=2.3.0",
 ]
 
 [project.optional-dependencies]

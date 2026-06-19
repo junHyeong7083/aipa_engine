@@ -23,8 +23,8 @@ from ..models import (
 )
 # 시뮬레이션 실행 서비스 (C#의 ISimulationService)
 from ..services.simulation_service import SimulationService
-# Firestore 서비스 (DB 저장)
-from ..services.firestore_service import FirestoreService
+# PostgreSQL 데이터 서비스 (DB 저장, 기존 Firestore 대체)
+from ..services.db_service import PostgresService
 # 연령대 파싱 함수 (personas.py에서 공유)
 from .personas import parse_age_groups
 
@@ -193,14 +193,14 @@ async def run_simulation(session_id: str):
 
         session.status = SimulationStatus.COMPLETED
 
-        # Firestore에 완료된 세션 저장
+        # PostgreSQL에 완료된 세션 저장
         try:
-            fs = FirestoreService()
-            if fs.available:
-                fs.save_simulation(session_id, session.model_dump(mode="json"))
-                logger.info(f"Simulation {session_id} saved to Firestore")
-        except Exception as fs_err:
-            logger.warning(f"Firestore save failed: {fs_err}")
+            db = PostgresService()
+            if db.available:
+                await db.save_simulation(session_id, session.model_dump(mode="json"))
+                logger.info(f"Simulation {session_id} saved to PostgreSQL")
+        except Exception as db_err:
+            logger.warning(f"DB save failed: {db_err}")
 
     except Exception as e:
         # 실패 시 에러 정보 저장

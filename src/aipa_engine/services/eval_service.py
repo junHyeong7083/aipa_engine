@@ -22,6 +22,34 @@ from ..models.evaluation import (
 
 logger = logging.getLogger(__name__)
 
+# ─────────────────────────────────────────────────────────────
+# 트렌드 보정 파라미터
+# ─────────────────────────────────────────────────────────────
+# 검색량 증감률(±50%)을 점수로 환산할 때의 진폭. 0.5 * 30 = ±15점.
+TREND_MAX_POINTS = 30.0
+
+# 축별 트렌드 민감도 가중치 (트렌드에 따라 더/덜 흔들리는 정도)
+# 구매의향·관심도처럼 시장 분위기에 직접 반응하는 축은 높게,
+# 가격적절성·신뢰도처럼 트렌드와 무관한 축은 낮게.
+AXIS_TREND_WEIGHT = {
+    "트렌드부합": 1.2, "트렌드부합도": 1.2,
+    "구매의향": 1.0, "클릭의향": 1.0, "관심도": 1.0,
+    "사용의향": 0.9, "참여의향": 0.9,
+    "호감도": 0.8, "추천의향": 0.8, "디자인호감도": 0.7,
+    "신뢰도": 0.3, "가격적절성": 0.2,
+}
+DEFAULT_AXIS_TREND_WEIGHT = 0.4  # 매핑에 없는 축은 약하게만 반영
+
+# 페르소나 트렌드 추종 성향 (연령 + 특성)
+AGE_TREND_MULT = {
+    "10대": 1.2, "20대": 1.2, "30대": 1.0,
+    "40대": 0.9, "50대": 0.8, "60대+": 0.7,
+}
+TREND_FOLLOWING_KW = ["트렌디", "트렌드", "유행", "SNS", "인스타", "틱톡",
+                      "얼리어답터", "유튜브", "핫"]
+TREND_RESISTANT_KW = ["보수", "전통", "검소", "절약", "알뜰", "실용"]
+
+
 # 모델 경로 (여러 위치에서 자동 탐색)
 def _find_model_root() -> Path:
     """Docker(/app/) 또는 로컬 프로젝트 루트를 자동 탐색"""
@@ -185,55 +213,103 @@ class EvalService:
             logger.warning(f"RAG not available: {e}")
             return False
 
-    def _get_trend_adjustment(self, request: EvaluationRequest) -> dict[str, float]:
+    def _compute_trend_signal(self, query: str, n_results: int = 5) -> tuple[float, int]:
         """
-        RAG에서 트렌드 검색 → 축별 보정값 계산
+        RAG에서 트렌드를 검색해 '관련도 가중 검색량 증감'을 점수로 환산.
 
-        트렌드가 긍정적이면 관련 축 점수를 올리고,
-        트렌드가 없으면 보정 없음 (0).
+        문제 1 해결: 문서 '개수'가 아니라 거리(distance) 기반 관련도로 가중.
+        문제 2 해결: 키워드 매칭이 아니라 메타데이터의 latest_ratio vs avg_ratio
+                     (실제 검색량 증감)을 사용.
 
-        반환: {"호감도": +5.0, "구매의향": +3.0, ...}
+        반환: (base_points, doc_count)
+          base_points > 0 : 검색량 상승 추세, < 0 : 하락 추세, 0 : 신호 없음/무관
         """
         if not self._ensure_rag_loaded():
-            return {}
-
+            return 0.0, 0
         try:
-            # 자극물 키워드로 트렌드 검색
-            query = f"{request.stimulus_type.value} {request.stimulus[:50]}"
-            results = self._rag.search_trends(query, n_results=3)
+            results = self._rag.search_trends(query, n_results=n_results)
+            docs = (results.get("documents") or [[]])[0]
+            if not docs:
+                return 0.0, 0
 
-            documents = results.get("documents", [[]])[0]
-            if not documents:
-                return {}
+            metas = (results.get("metadatas") or [[]])[0]
+            dists = (results.get("distances") or [[]])[0]
+            threshold = getattr(self._rag, "distance_threshold", 1.5) or 1.5
 
-            # 트렌드 문서 수에 따라 보정값 결정
-            # 관련 트렌드가 많을수록 → 시장 관심 높음 → 호감도/구매의향 상승
-            trend_count = len(documents)
-            base_boost = min(trend_count * 3, 10)  # 최대 +10점
+            weighted_sum = 0.0
+            weight_total = 0.0
+            for i, meta in enumerate(metas):
+                dist = dists[i] if i < len(dists) else threshold
+                # 관련도: 가까울수록 1, 임계값에서 0
+                relevance = max(0.0, 1.0 - (dist / threshold))
+                if relevance <= 0:
+                    continue
+                latest = meta.get("latest_ratio")
+                avg = meta.get("avg_ratio")
+                if latest is None or not avg:
+                    continue
+                pct = (float(latest) - float(avg)) / float(avg)  # 검색량 증감률
+                pct = max(-0.5, min(0.5, pct))                    # ±50%로 클램프
+                weighted_sum += relevance * pct
+                weight_total += relevance
 
-            # 트렌드 내용에서 긍정/부정 키워드 체크
-            trend_text = " ".join(documents).lower()
-            positive_keywords = ["증가", "상승", "인기", "급등", "성장", "확대", "호조"]
-            negative_keywords = ["감소", "하락", "위축", "둔화", "축소", "부진"]
+            if weight_total == 0:
+                return 0.0, len(docs)
 
-            positive_count = sum(1 for kw in positive_keywords if kw in trend_text)
-            negative_count = sum(1 for kw in negative_keywords if kw in trend_text)
-
-            sentiment = (positive_count - negative_count) * 2  # -10 ~ +10 범위
-
-            # 축별 보정값 (트렌드 관련 축만 보정)
-            adjustments = {}
-            trend_sensitive_axes = ["호감도", "구매의향", "관심도", "사용의향",
-                                    "참여의향", "클릭의향", "추천의향"]
-            for axis in trend_sensitive_axes:
-                adjustments[axis] = base_boost + sentiment
-
-            logger.info(f"Trend adjustment: {trend_count} docs, sentiment={sentiment}, boost={base_boost}")
-            return adjustments
+            weighted_trend = weighted_sum / weight_total          # [-0.5, 0.5]
+            base_points = weighted_trend * TREND_MAX_POINTS       # ≈ [-15, +15]
+            return base_points, len(docs)
 
         except Exception as e:
-            logger.warning(f"Trend adjustment failed: {e}")
+            logger.debug(f"trend signal failed: {e}")
+            return 0.0, 0
+
+    def _persona_trend_sensitivity(self, traits, age_group: str) -> float:
+        """
+        문제 3-a 해결: 페르소나의 트렌드 추종 성향 배수 (0.4~1.6).
+        트렌디·젊을수록 ↑, 보수적·고령일수록 ↓.
+        """
+        mult = AGE_TREND_MULT.get(age_group, 1.0)
+        for t in (traits or []):
+            if any(kw in t for kw in TREND_FOLLOWING_KW):
+                mult += 0.15
+            elif any(kw in t for kw in TREND_RESISTANT_KW):
+                mult -= 0.15
+        return max(0.4, min(1.6, mult))
+
+    def _get_trend_adjustment(self, request: EvaluationRequest) -> dict[str, float]:
+        """
+        RAG 트렌드 → 축별 점수 보정값 계산.
+
+        문제 3-b 해결: 축마다 트렌드 민감도(AXIS_TREND_WEIGHT)를 달리 적용하고,
+                      페르소나 성향(sensitivity)으로 한 번 더 스케일.
+        반환: {"구매의향": +6.2, "가격적절성": +1.1, ...} (음수 가능)
+        """
+        base_points, doc_count = self._compute_trend_signal(
+            f"{request.stimulus_type.value} {request.stimulus[:50]}"
+        )
+        if base_points == 0.0:
             return {}
+
+        sensitivity = self._persona_trend_sensitivity(
+            request.persona_traits, request.persona_age_group
+        )
+
+        adjustments: dict[str, float] = {}
+        for axis in request.get_axes():
+            w = AXIS_TREND_WEIGHT.get(axis, DEFAULT_AXIS_TREND_WEIGHT)
+            if w <= 0:
+                continue
+            adj = base_points * sensitivity * w
+            if abs(adj) >= 0.5:
+                adjustments[axis] = round(adj, 1)
+
+        if adjustments:
+            logger.info(
+                f"Trend adj: base={base_points:.1f}, sens={sensitivity:.2f}, "
+                f"docs={doc_count}, axes={len(adjustments)}"
+            )
+        return adjustments
 
     def _ensure_reasoning_model_loaded(self) -> bool:
         """0.5B 이유 생성 모델 로드 (최초 1회)"""

@@ -166,7 +166,7 @@ class ResponseGenerator:
                 score_100 = int(score.item() * 100)
 
             # ★ 트렌드 보정 (네이버 데이터랩 RAG)
-            trend_adj = self._get_trend_adjustment(question.text, cat_name)
+            trend_adj = self._get_trend_adjustment(persona, question.text, cat_name)
             if trend_adj != 0:
                 score_100 = max(0, min(100, score_100 + trend_adj))
                 logger.debug(f"트렌드 보정: {trend_adj:+d} → 최종 {score_100}점")
@@ -177,10 +177,11 @@ class ResponseGenerator:
             logger.warning(f"임베딩 점수 예측 실패: {e}")
             return None
 
-    def _get_trend_adjustment(self, question_text: str, category: str) -> int:
+    def _get_trend_adjustment(self, persona: Persona, question_text: str, category: str) -> int:
         """
         ★ 네이버 데이터랩 트렌드 기반 점수 보정
-        관련 검색 트렌드가 상승 중이면 점수 상향, 하락이면 하향
+        검색량이 평균 대비 상승 추세면 +, 하락이면 -.
+        EvalService의 공통 신호 계산을 재사용하고, 페르소나 성향으로 스케일.
         """
         if not self._ensure_eval_service():
             return 0
@@ -190,25 +191,20 @@ class ResponseGenerator:
             return 0
 
         try:
-            query = f"{category} {question_text[:50]}"
-            results = svc._rag.search_trends(query, n_results=3)
-
-            documents = results.get("documents", [[]])[0]
-            if not documents:
+            base_points, _ = svc._compute_trend_signal(f"{category} {question_text[:50]}")
+            if base_points == 0.0:
                 return 0
 
-            trend_count = len(documents)
-            base_boost = min(trend_count * 3, 10)  # 최대 +10점
-
-            trend_text = " ".join(documents).lower()
-            positive_kw = ["증가", "상승", "인기", "급등", "성장", "확대", "호조"]
-            negative_kw = ["감소", "하락", "위축", "둔화", "축소", "부진"]
-
-            pos = sum(1 for kw in positive_kw if kw in trend_text)
-            neg = sum(1 for kw in negative_kw if kw in trend_text)
-            sentiment = (pos - neg) * 2
-
-            return base_boost + sentiment
+            age_map = {
+                AgeGroup.TEENS: "10대", AgeGroup.TWENTIES: "20대", AgeGroup.THIRTIES: "30대",
+                AgeGroup.FORTIES: "40대", AgeGroup.FIFTIES: "50대", AgeGroup.SIXTIES_PLUS: "60대+",
+            }
+            sensitivity = svc._persona_trend_sensitivity(
+                persona.attributes.traits,
+                age_map.get(persona.attributes.age_group, "30대"),
+            )
+            # 설문 응답은 '선호도' 축 → 트렌드 민감 가중 1.0
+            return int(round(base_points * sensitivity))
 
         except Exception as e:
             logger.debug(f"트렌드 보정 실패 (무시): {e}")

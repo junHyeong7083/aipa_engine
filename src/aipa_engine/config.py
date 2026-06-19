@@ -36,6 +36,27 @@ class Settings(BaseSettings):
     naver_client_id: str = ""               # 네이버 개발자센터 Client ID
     naver_client_secret: str = ""           # 네이버 개발자센터 Client Secret
 
+    # --- PostgreSQL (Firestore 대체) ---
+    # aishort 백엔드와 동일한 컨벤션. VM 로컬 PG 또는 외부 PG 접속.
+    db_host: str = "127.0.0.1"
+    db_port: int = 5432
+    db_name: str = "aipa_db"
+    db_user: str = "aipa"
+    db_password: str = ""
+
+    # --- 보호 라우트용 공유 Bearer 토큰 (aishort 방식) ---
+    # 비어 있으면 쓰기 라우트(PUT/DELETE)가 503 으로 거부됨.
+    # 클라이언트는 'Authorization: Bearer <값>' 헤더로 동일 토큰 전송.
+    api_bearer_token: str = ""
+
+    @property
+    def database_url(self) -> str:
+        """asyncpg 접속 DSN"""
+        return (
+            f"postgresql://{self.db_user}:{self.db_password}"
+            f"@{self.db_host}:{self.db_port}/{self.db_name}"
+        )
+
     # --- CORS 설정 (C#의 services.AddCors()와 동일) ---
     allowed_origins: str = ""  # 쉼표로 구분된 허용 도메인. 비어있으면 모든 도메인 허용(*)
 

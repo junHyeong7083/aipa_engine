@@ -279,13 +279,11 @@ async def _check_kosis() -> dict:
         return {"status": "error", "latency_ms": 0, "detail": str(e)}
 
 
-def _check_firestore() -> dict:
-    """Check if Firestore credentials are available."""
+def _check_database() -> dict:
+    """Check if the PostgreSQL connection pool is available."""
     try:
-        import firebase_admin
-        from firebase_admin import firestore
-        app = firebase_admin.get_app()
-        return {"status": "ok"}
+        from ..db import get_pool
+        return {"status": "ok"} if get_pool() is not None else {"status": "unavailable"}
     except Exception:
         return {"status": "unavailable"}
 
@@ -313,13 +311,13 @@ async def health():
     """Detailed health check with external dependency status."""
     anthropic_check = await _check_anthropic()
     kosis_check = await _check_kosis()
-    firestore_check = _check_firestore()
+    database_check = _check_database()
     rag_check = _check_rag_index()
 
     checks = {
         "anthropic_api": anthropic_check,
         "kosis_api": kosis_check,
-        "firestore": firestore_check,
+        "database": database_check,
         "rag_index": rag_check,
     }
 

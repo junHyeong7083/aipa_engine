@@ -1,0 +1,53 @@
+# AIPA Engine — VM 배포용 (PostgreSQL + FastAPI 앱)
+#
+# 사용법 (VM에서):
+#   1) cp .env.example .env  후 값 채우기 (특히 DB_PASSWORD, API_BEARER_TOKEN)
+#   2) docker compose up -d --build
+#   3) docker compose logs -f app
+#
+# 모델/데이터는 이미지에 굽지 않고 호스트 디렉터리를 마운트한다 (reasoning 모델 2.8GB).
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-aipa_db}
+      POSTGRES_USER: ${DB_USER:-aipa}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-aipa} -d ${DB_NAME:-aipa_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 8080
+      # 앱은 같은 compose 네트워크의 db 서비스로 접속
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-aipa_db}
+      DB_USER: ${DB_USER:-aipa}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
+      API_BEARER_TOKEN: ${API_BEARER_TOKEN:?API_BEARER_TOKEN must be set in .env}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      KOSIS_API_KEY: ${KOSIS_API_KEY:-}
+      NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
+      NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+    volumes:
+      # 모델/데이터를 읽기전용으로 마운트 (이미지에 굽지 않음)
+      - ./training/models:/app/training/models:ro
+      - ./data:/app/data:ro
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:
