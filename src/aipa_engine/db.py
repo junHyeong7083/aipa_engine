@@ -55,6 +55,17 @@ CREATE TABLE IF NOT EXISTS survey_history (
 );
 CREATE INDEX IF NOT EXISTS idx_survey_history_user ON survey_history(user_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id          TEXT PRIMARY KEY,                           -- {user_id}_{platform|persona}
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    platform    TEXT,                                       -- youtube/dcinside/naver/... (없으면 NULL)
+    title       TEXT NOT NULL DEFAULT '대화',
+    messages    JSONB NOT NULL DEFAULT '[]'::jsonb,         -- [{role, content}, ...]
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS simulations (
     session_id  TEXT PRIMARY KEY,
     data        JSONB NOT NULL,

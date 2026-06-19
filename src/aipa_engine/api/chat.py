@@ -5,7 +5,10 @@
 Flutter 앱의 chat_screen에서 호출됨.
 """
 
+import json
 import logging
+import random
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -19,6 +22,85 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# ─────────────────────────────────────────────────────────────
+# 커뮤니티(플랫폼) 말투 주입
+#   - platform_data 의 tone_guide + data/platform_tone 의 실제 댓글 few-shot
+# ─────────────────────────────────────────────────────────────
+
+# 플랫폼 → (실제 댓글 jsonl 파일, 본문 후보 필드)
+_TONE_FILES = {
+    "youtube": ("youtube_real_comments.jsonl", ["text", "content"]),
+    "dcinside": ("dcinside_real_posts.jsonl", ["content", "text", "title"]),
+    "naver": ("naver_real_posts.jsonl", ["content", "text", "title"]),
+}
+
+
+def _load_tone_examples(platform: str, n: int = 6) -> list[str]:
+    """data/platform_tone 의 실제 커뮤니티 글에서 few-shot 예시 추출."""
+    entry = _TONE_FILES.get(platform.lower())
+    if not entry:
+        return []
+    fname, fields = entry
+    path = Path("data/platform_tone") / fname
+    if not path.exists():
+        return []
+    out: list[str] = []
+    try:
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                for fld in fields:
+                    v = obj.get(fld)
+                    if isinstance(v, str):
+                        s = " ".join(v.split())
+                        if 5 <= len(s) <= 200:
+                            out.append(s)
+                            break
+                if len(out) >= n * 5:  # 풀을 넉넉히 모은 뒤 샘플
+                    break
+    except Exception as e:
+        logger.warning(f"tone examples load failed ({fname}): {e}")
+        return []
+    if not out:
+        return []
+    random.shuffle(out)
+    return out[:n]
+
+
+def _build_tone_block(platform: str) -> Optional[str]:
+    """선택한 커뮤니티의 말투 지시문 + 실제 예시 블록 생성."""
+    try:
+        from ..platforms.platform_data import get_profile
+        profile = get_profile(platform)
+    except Exception:
+        return None
+
+    parts = [
+        f"당신은 '{profile.name_kr}' 커뮤니티의 전형적인 사용자입니다. "
+        f"그 커뮤니티 특유의 어휘와 말투로 답변하세요."
+    ]
+    if profile.tone_guide:
+        parts.append(f"말투 가이드: {profile.tone_guide}")
+
+    examples = _load_tone_examples(platform)
+    if examples:
+        joined = "\n".join(f"- {e}" for e in examples)
+        parts.append(
+            "다음은 이 커뮤니티의 실제 글/댓글 예시입니다. "
+            "이 어휘·어미·분위기를 모방하되, 내용은 사용자 질문에 맞게 답하세요:\n" + joined
+        )
+    parts.append(
+        "단, 욕설·혐오·차별 표현은 순화하고, 핵심 분석/답변 내용은 정확하게 전달하세요."
+    )
+    return "\n\n".join(parts)
+
+
 class ChatHistoryItem(BaseModel):
     """대화 히스토리 항목"""
     role: str = Field(..., description="'user' 또는 'assistant'")
@@ -29,6 +111,7 @@ class ChatMessageRequest(BaseModel):
     """채팅 메시지 요청 바디"""
     message: str = Field(..., min_length=1, description="사용자 메시지")
     persona: dict = Field(default_factory=dict, description="페르소나 정보")
+    platform: Optional[str] = Field(None, description="커뮤니티 말투 (youtube, dcinside, naver, instagram 등)")
     goal: Optional[str] = Field(None, description="목표 (feedback, evaluate, improve, score, counter)")
     format: Optional[str] = Field(None, description="결과 형식 (short, detailed)")
     history: list[ChatHistoryItem] = Field(default_factory=list, description="이전 대화 히스토리")
@@ -88,6 +171,12 @@ async def send_chat_message(request: ChatMessageRequest):
 
 이 인물의 관점과 전문성을 바탕으로 사용자에게 답변해주세요.
 1인칭으로 자연스럽게 대화하되, 전문적이고 도움이 되는 답변을 제공하세요.""")
+
+        # 커뮤니티(플랫폼) 말투 주입 — 선택한 커뮤니티의 어투 + 실제 댓글 few-shot
+        if request.platform:
+            tone_block = _build_tone_block(request.platform)
+            if tone_block:
+                system_parts.append(tone_block)
 
         # 목표 지시문
         if request.goal and request.goal in GOAL_INSTRUCTIONS:

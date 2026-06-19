@@ -6,6 +6,10 @@
 #   3) docker compose logs -f app
 #
 # 모델/데이터는 이미지에 굽지 않고 호스트 디렉터리를 마운트한다 (reasoning 모델 2.8GB).
+#
+# 모든 리소스가 'aipa' 프로젝트로 격리됨 → 시연 후 원클릭 삭제:
+#   docker compose -p aipa down -v --rmi local   (또는 ./aipa_teardown.sh)
+name: aipa
 services:
   db:
     image: postgres:15-alpine
@@ -47,7 +51,8 @@ services:
       - ./training/models:/app/training/models:ro
       - ./data:/app/data:ro
     ports:
-      - "8080:8080"
+      # 외부에는 직접 노출하지 않고 nginx(8443)가 프록시 → localhost만 바인드
+      - "127.0.0.1:8090:8080"
 
 volumes:
   pgdata:

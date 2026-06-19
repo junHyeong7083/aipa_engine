@@ -30,7 +30,7 @@ class Settings(BaseSettings):
 
     # --- Anthropic API (Claude AI) ---
     anthropic_api_key: str = ""             # Claude API 키
-    anthropic_model: str = "claude-sonnet-4-20250514"  # 사용할 Claude 모델명
+    anthropic_model: str = "claude-sonnet-4-6"  # 사용할 Claude 모델명 (멀티모달, 현행)
 
     # --- 네이버 데이터랩 API ---
     naver_client_id: str = ""               # 네이버 개발자센터 Client ID

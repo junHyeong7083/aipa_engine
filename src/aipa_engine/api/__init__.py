@@ -11,10 +11,12 @@ from .upload import router as upload_router
 from .evaluations import router as evaluations_router
 from .platforms import router as platforms_router
 from .users import router as users_router
+from .chats import router as chats_router
 
 router = APIRouter()
 
 router.include_router(users_router, prefix="/users", tags=["users"])
+router.include_router(chats_router, prefix="/chats", tags=["chats"])
 router.include_router(simulations_router, prefix="/simulations", tags=["simulations"])
 router.include_router(personas_router, prefix="/personas", tags=["personas"])
 router.include_router(statistics_router, prefix="/statistics", tags=["statistics"])
